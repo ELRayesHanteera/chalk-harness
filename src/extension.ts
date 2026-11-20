@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { LlmAgentPlayer } from './agent/llmAgentPlayer.js';
-import { LlmClient, LlmConfig, LlmProvider } from './agent/llmClient.js';
+import { ChatMessage, LlmClient, LlmConfig, LlmProvider } from './agent/llmClient.js';
 import { ShadowCheckpointManager } from './git/shadowCheckpoint.js';
 import { ChalkMcpBridgeServer } from './mcp/server.js';
 import { MockAgentPlayer } from './mock/mockAgentPlayer.js';
@@ -64,6 +64,7 @@ class ChalkCoordinator implements vscode.Disposable {
 
   private followMeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private activeTrace: { result: TraceResult; index: number; uri: vscode.Uri } | null = null;
+  private ideLmModelLabel: string | null = null;
 
   constructor(private readonly extensionContext: vscode.ExtensionContext) {
     const workspaceRoot = this.getWorkspaceRoot();
@@ -73,7 +74,15 @@ class ChalkCoordinator implements vscode.Disposable {
     this.streamer = new ChunkStreamer(this.camera, this.markManager);
     this.codeLens = new ActionBarCodeLensProvider();
     this.checkpoints = new ShadowCheckpointManager(workspaceRoot);
-    this.llmClient = new LlmClient(() => this.readLlmConfig());
+    this.llmClient = new LlmClient(
+      () => this.readLlmConfig(),
+      {
+        isAvailable: () => this.ideLmModelLabel !== null,
+        describe: () => `IDE Language Model (${this.ideLmModelLabel ?? 'vscode.lm'})`,
+        complete: (systemPrompt, messages) =>
+          this.completeWithIdeLanguageModel(systemPrompt, messages),
+      }
+    );
     this.mockingRepl = new MockingRepl(workspaceRoot, this.llmClient);
     this.traceAndAlt = new TraceAndAltEngine(this.llmClient, this.mockingRepl);
     this.squasher = new BoardEraserSquasher(this.llmClient);
@@ -146,6 +155,8 @@ class ChalkCoordinator implements vscode.Disposable {
   }
 
   public async initialize(): Promise<void> {
+    await this.probeIdeLanguageModel();
+
     const mcpCfg = vscode.workspace.getConfiguration('chalk.mcp');
     if (mcpCfg.get<boolean>('autoStart', true)) {
       const port = mcpCfg.get<number>('port', 7331);
@@ -788,6 +799,91 @@ class ChalkCoordinator implements vscode.Disposable {
       maxTokensPerChunk: cfg.get<number>('maxTokensPerChunk', 1600),
       maxChunksPerSession: cfg.get<number>('maxChunksPerSession', 25),
     };
+  }
+
+  private async probeIdeLanguageModel(): Promise<void> {
+    try {
+      const vscodeAny = vscode as unknown as {
+        lm?: { selectChatModels?: (selector?: Record<string, string>) => Promise<Array<{ id?: string; name?: string }>> };
+      };
+      if (typeof vscodeAny.lm?.selectChatModels !== 'function') {
+        this.ideLmModelLabel = null;
+        return;
+      }
+      const models = await vscodeAny.lm.selectChatModels();
+      if (Array.isArray(models) && models.length > 0) {
+        this.ideLmModelLabel = models[0].name || models[0].id || 'IDE Chat Model';
+      } else {
+        this.ideLmModelLabel = null;
+      }
+    } catch {
+      this.ideLmModelLabel = null;
+    }
+  }
+
+  private async completeWithIdeLanguageModel(
+    systemPrompt: string,
+    messages: ChatMessage[]
+  ): Promise<string | null> {
+    try {
+      const vscodeAny = vscode as unknown as {
+        lm?: {
+          selectChatModels?: () => Promise<
+            Array<{
+              name?: string;
+              id?: string;
+              sendRequest: (
+                msgs: unknown[],
+                options: Record<string, unknown>,
+                token: vscode.CancellationToken
+              ) => Promise<{ text: AsyncIterable<string> }>;
+            }>
+          >;
+        };
+        LanguageModelChatMessage?: {
+          User: (content: string) => unknown;
+          Assistant: (content: string) => unknown;
+        };
+      };
+
+      if (
+        typeof vscodeAny.lm?.selectChatModels !== 'function' ||
+        !vscodeAny.LanguageModelChatMessage
+      ) {
+        return null;
+      }
+
+      const models = await vscodeAny.lm.selectChatModels();
+      if (!Array.isArray(models) || models.length === 0) {
+        this.ideLmModelLabel = null;
+        return null;
+      }
+
+      const model = models[0];
+      this.ideLmModelLabel = model.name || model.id || 'IDE Chat Model';
+
+      const lmMessages: unknown[] = [
+        vscodeAny.LanguageModelChatMessage.User(
+          `[System Instructions]\n${systemPrompt}`
+        ),
+        ...messages.map((m) =>
+          m.role === 'assistant'
+            ? vscodeAny.LanguageModelChatMessage!.Assistant(m.content)
+            : vscodeAny.LanguageModelChatMessage!.User(m.content)
+        ),
+      ];
+
+      const cts = new vscode.CancellationTokenSource();
+      const response = await model.sendRequest(lmMessages, {}, cts.token);
+      let fullText = '';
+      for await (const chunk of response.text) {
+        fullText += chunk;
+      }
+      cts.dispose();
+      return fullText.trim() || null;
+    } catch {
+      return null;
+    }
   }
 
   private getWorkspaceRoot(): string {

@@ -249,6 +249,23 @@ test('LlmClient extracts JSON cleanly and retries once on malformed output', asy
   } finally {
     globalThis.fetch = originalFetch;
   }
+
+  // Verify IDE-native vscode.lm fallback works when no API key is configured
+  const ideClient = new LlmClient(
+    () => ({
+      provider: 'auto',
+      apiKey: '',
+      maxTokensPerChunk: 400,
+      maxChunksPerSession: 5,
+    }),
+    {
+      isAvailable: () => true,
+      describe: () => 'IDE Language Model (mock-pro)',
+      complete: async () => 'Hello from IDE LM!',
+    }
+  );
+  assert.equal(ideClient.isConfigured(), true);
+  assert.equal(await ideClient.completeText('sys', [{ role: 'user', content: 'hi' }]), 'Hello from IDE LM!');
 });
 
 test('MockAgentPlayer loads mock-session.json deterministically', async () => {

@@ -99,23 +99,43 @@ export function resolveLlmProvider(config: LlmConfig): ResolvedProvider | null {
   };
 }
 
+export type IdeLmFallbackHandler = (
+  systemPrompt: string,
+  messages: ChatMessage[],
+  options?: { maxTokens?: number; temperature?: number }
+) => Promise<string | null>;
+
 /**
- * Multi-provider LLM client (Anthropic, OpenAI / OpenAI-compatible, Gemini)
- * using built-in fetch with strict Zod JSON schema validation and 1-retry recovery.
+ * Multi-provider LLM client (Anthropic, OpenAI / OpenAI-compatible, Gemini, plus
+ * optional IDE-native `vscode.lm` fallback) using built-in fetch with strict Zod
+ * JSON schema validation and 1-retry recovery.
  */
 export class LlmClient {
-  constructor(private readonly getConfig: () => LlmConfig) {}
+  constructor(
+    private readonly getConfig: () => LlmConfig,
+    private readonly ideLmFallback?: {
+      isAvailable: () => boolean;
+      complete: IdeLmFallbackHandler;
+      describe: () => string;
+    }
+  ) {}
 
   public isConfigured(): boolean {
-    return resolveLlmProvider(this.getConfig()) !== null;
+    return (
+      resolveLlmProvider(this.getConfig()) !== null ||
+      Boolean(this.ideLmFallback?.isAvailable())
+    );
   }
 
   public describeProvider(): string {
     const resolved = resolveLlmProvider(this.getConfig());
-    if (!resolved) {
-      return 'Not configured (set chalk.llm.apiKey or ANTHROPIC_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY)';
+    if (resolved) {
+      return `${resolved.provider} (${resolved.model})`;
     }
-    return `${resolved.provider} (${resolved.model})`;
+    if (this.ideLmFallback?.isAvailable()) {
+      return this.ideLmFallback.describe();
+    }
+    return 'Not configured (set chalk.llm.apiKey or ANTHROPIC_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY)';
   }
 
   public async completeText(
@@ -125,9 +145,16 @@ export class LlmClient {
   ): Promise<string> {
     const config = this.getConfig();
     const resolved = resolveLlmProvider(config);
+
     if (!resolved) {
+      if (this.ideLmFallback) {
+        const ideReply = await this.ideLmFallback.complete(systemPrompt, messages, options);
+        if (ideReply && ideReply.trim()) {
+          return ideReply;
+        }
+      }
       throw new Error(
-        'No LLM API key configured. Set `chalk.llm.apiKey` in settings or export ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.'
+        'No LLM API key configured and the IDE did not expose a `vscode.lm` chat model. Set `chalk.llm.apiKey` (or a local Ollama `chalk.llm.baseUrl`) to enable live side-chat.'
       );
     }
 

@@ -649,17 +649,17 @@ function getWebviewHtml(): string {
   function renderMarkdown(md) {
     let html = escapeHtml(md || '');
     // Fenced code blocks
-    html = html.replace(/\`\`\`(?:[\w-]*)\n([\s\S]*?)\`\`\`/g, (_, code) => '<pre><code>' + code + '</code></pre>');
+    html = html.replace(new RegExp('\`\`\`(?:[\\w-]*)\\n([\\s\\S]*?)\`\`\`', 'g'), (_, code) => '<pre><code>' + code + '</code></pre>');
     // Inline code
-    html = html.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
+    html = html.replace(new RegExp('\`([^\`]+)\`', 'g'), '<code>$1</code>');
     // Bold
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
     // Italic
-    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    html = html.replace(/\\*([^*]+)\\*/g, '<em>$1</em>');
     // Paragraphs / breaks
     html = html
-      .split(/\n\n+/)
-      .map((block) => block.startsWith('<pre>') ? block : '<p>' + block.replace(/\n/g, '<br/>') + '</p>')
+      .split(/\\n\\n+/)
+      .map((block) => block.startsWith('<pre>') ? block : '<p>' + block.replace(/\\n/g, '<br/>') + '</p>')
       .join('');
     return html;
   }
