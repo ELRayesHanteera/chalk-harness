@@ -8,6 +8,7 @@ import { MockAgentPlayer } from './mock/mockAgentPlayer.js';
 import { BoardEraserSquasher } from './sideAgent/boardEraserSquasher.js';
 import { MockingRepl } from './sideAgent/mockingRepl.js';
 import { SlashRouter } from './sideAgent/slashRouter.js';
+import { TraceAndAltEngine } from './sideAgent/traceAndAlt.js';
 import {
   AgentPlayer,
   AltProposal,
@@ -51,6 +52,7 @@ class ChalkCoordinator implements vscode.Disposable {
   private readonly checkpoints: ShadowCheckpointManager;
   private readonly llmClient: LlmClient;
   private readonly mockingRepl: MockingRepl;
+  private readonly traceAndAlt: TraceAndAltEngine;
   private readonly squasher: BoardEraserSquasher;
   private readonly slashRouter: SlashRouter;
   private readonly inlineWidget: InlineWidgetController;
@@ -71,6 +73,7 @@ class ChalkCoordinator implements vscode.Disposable {
     this.checkpoints = new ShadowCheckpointManager(workspaceRoot);
     this.llmClient = new LlmClient(() => this.readLlmConfig());
     this.mockingRepl = new MockingRepl(workspaceRoot, this.llmClient);
+    this.traceAndAlt = new TraceAndAltEngine(this.llmClient, this.mockingRepl);
     this.squasher = new BoardEraserSquasher(this.llmClient);
     this.slashRouter = new SlashRouter(this.llmClient, this.mockingRepl);
 
@@ -178,8 +181,24 @@ class ChalkCoordinator implements vscode.Disposable {
           await this.handleSideChatInput(cmd.trim());
         }
       }),
-      vscode.commands.registerCommand('chalk.tourPrev', () => this.camera.prevStep()),
-      vscode.commands.registerCommand('chalk.tourNext', () => this.camera.nextStep()),
+      vscode.commands.registerCommand('chalk.tourPrev', () => {
+        if (this.camera.getTourState().active) {
+          return this.camera.prevStep();
+        }
+        if (this.activeTrace) {
+          this.stepTraceIteration(-1);
+        }
+        return null;
+      }),
+      vscode.commands.registerCommand('chalk.tourNext', () => {
+        if (this.camera.getTourState().active) {
+          return this.camera.nextStep();
+        }
+        if (this.activeTrace) {
+          this.stepTraceIteration(1);
+        }
+        return null;
+      }),
       vscode.commands.registerCommand('chalk.tourStop', () => this.camera.stopTour(true)),
       vscode.commands.registerCommand('chalk.openHistory', () => this.openHistoryForActiveFile()),
       vscode.commands.registerCommand('chalk.clearMarks', () => {
@@ -483,6 +502,9 @@ class ChalkCoordinator implements vscode.Disposable {
         chunk: targetChunk,
         fileContent: doc.getText(),
         activePlayer: this.activePlayer,
+        onTrace: (chunk, content, prompt) => this.traceAndAlt.runTrace(chunk, content, prompt),
+        onAlt: (chunk, content, prompt) =>
+          this.traceAndAlt.generateAlternative(chunk, content, prompt),
       });
 
       this.inlineWidget.updateMessages(this.slashRouter.getMessages());
