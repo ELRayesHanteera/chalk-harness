@@ -1,0 +1,209 @@
+{
+  "name": "chalk-harness",
+  "displayName": "Chalk — Whiteboard Harness for Agents",
+  "description": "Stop rubber-stamping 500-line diffs. Put your coding agent at the chalkboard — synchronous AST-chunk streaming, visual Chalk Marks, isolated inline side-chat, Git shadow checkpoints, and an MCP bridge for any IDE or CLI coding agent.",
+  "version": "0.1.0",
+  "publisher": "chalk-harness",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ELRayesHanteera/chalk-harness.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "bin": {
+    "chalk-mcp-proxy": "./dist/mcp/stdioProxy.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "chalk.startFromPlan",
+        "title": "Chalk: Start Session from plan.md"
+      },
+      {
+        "command": "chalk.runSession",
+        "title": "Chalk: Run Session"
+      },
+      {
+        "command": "chalk.runMockSession",
+        "title": "Chalk: Run Demo / Mock Session"
+      },
+      {
+        "command": "chalk.continue",
+        "title": "Chalk: Continue"
+      },
+      {
+        "command": "chalk.undoChunk",
+        "title": "Chalk: Undo Chunk"
+      },
+      {
+        "command": "chalk.autoFinishFile",
+        "title": "Chalk: Auto-Finish File"
+      },
+      {
+        "command": "chalk.openInlineWidget",
+        "title": "Chalk: Open Side-Chat Widget"
+      },
+      {
+        "command": "chalk.runSlashCommand",
+        "title": "Chalk: Run Slash Command"
+      },
+      {
+        "command": "chalk.tourPrev",
+        "title": "Chalk: Tour Previous Step"
+      },
+      {
+        "command": "chalk.tourNext",
+        "title": "Chalk: Tour Next Step"
+      },
+      {
+        "command": "chalk.tourStop",
+        "title": "Chalk: Stop Tour"
+      },
+      {
+        "command": "chalk.openHistory",
+        "title": "Chalk: Open File History Scrubber"
+      },
+      {
+        "command": "chalk.clearMarks",
+        "title": "Chalk: Clear Chalk Marks"
+      },
+      {
+        "command": "chalk.mcpStatus",
+        "title": "Chalk: Show MCP Server Status & Config"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "chalk.continue",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
+        "when": "chalk.awaitingAction"
+      },
+      {
+        "command": "chalk.openInlineWidget",
+        "key": "ctrl+alt+/",
+        "mac": "cmd+alt+/",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "chalk.tourPrev",
+        "key": "alt+[",
+        "when": "chalk.tourActive"
+      },
+      {
+        "command": "chalk.tourNext",
+        "key": "alt+]",
+        "when": "chalk.tourActive"
+      }
+    ],
+    "configuration": {
+      "title": "Chalk — Whiteboard Harness",
+      "properties": {
+        "chalk.llm.provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "anthropic",
+            "openai",
+            "gemini"
+          ],
+          "default": "auto",
+          "description": "LLM provider used by LlmAgentPlayer and the isolated Side-Agent. 'auto' detects available API keys from environment variables."
+        },
+        "chalk.llm.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model ID override. Leave empty to use a fast, low-cost default for the selected provider."
+        },
+        "chalk.llm.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key override. Leave empty to read from ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY."
+        },
+        "chalk.llm.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom base URL for OpenAI-compatible APIs (e.g., Ollama, OpenRouter, vLLM)."
+        },
+        "chalk.llm.maxTokensPerChunk": {
+          "type": "number",
+          "default": 1600,
+          "minimum": 256,
+          "maximum": 8192,
+          "description": "Cost guardrail: maximum output tokens per generated chunk or side-agent turn."
+        },
+        "chalk.llm.maxChunksPerSession": {
+          "type": "number",
+          "default": 25,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Cost guardrail: maximum chunks generated in a single standalone LLM session."
+        },
+        "chalk.streaming.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Stream code chunks progressively onto the editor chalkboard instead of inserting instantaneously."
+        },
+        "chalk.streaming.mode": {
+          "type": "string",
+          "enum": [
+            "line",
+            "token"
+          ],
+          "default": "line",
+          "description": "Streaming granularity when drawing chunks onto the chalkboard."
+        },
+        "chalk.streaming.delayMs": {
+          "type": "number",
+          "default": 22,
+          "minimum": 0,
+          "maximum": 250,
+          "description": "Delay in milliseconds between streamed lines or tokens."
+        },
+        "chalk.mcp.port": {
+          "type": "number",
+          "default": 7331,
+          "description": "Localhost port for Chalk's embedded MCP bridge WebSocket/HTTP server."
+        },
+        "chalk.mcp.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the local MCP bridge server when the IDE opens."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "package": "npm run build && npx @vscode/vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "diff": "^7.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.14",
+    "@vscode/vsce": "^3.3.2",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3"
+  }
+}

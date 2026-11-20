@@ -1,0 +1,15 @@
+.agents/
+node_modules/
+dist/
+out/
+*.vsix
+.vscode-test/
+.env
+.chalk-sandbox/
+node_modules/
+dist/
+out/
+*.vsix
+.vscode-test/
+.env
+.chalk-sandbox/

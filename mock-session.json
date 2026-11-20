@@ -1,0 +1,175 @@
+{
+  "title": "Demo Session: Token Auth Service (2-file Sandbox)",
+  "description": "Zero-token deterministic replay session illustrating cross-file AST chunks, Chalk Marks, split-screen /explain tours, /edge warnings, and /test mocking.",
+  "chunks": [
+    {
+      "chunk": {
+        "id": "step1-chunk1",
+        "stepNumber": 1,
+        "chunkIndex": 1,
+        "totalChunksInStep": 2,
+        "filePath": ".chalk-sandbox/userTypes.ts",
+        "startLine": 1,
+        "endLine": 18,
+        "mode": "replace",
+        "summary": "Define UserRole, AuthUser, and AuthResult domain contracts.",
+        "code": "export type UserRole = 'admin' | 'member' | 'guest';\n\nexport interface AuthUser {\n  id: string;\n  email: string;\n  role: UserRole;\n  suspended?: boolean;\n}\n\nexport interface SessionToken {\n  token: string;\n  userId: string;\n  expiresAtMs: number;\n}\n\nexport interface AuthResult {\n  ok: boolean;\n  user?: AuthUser;\n  reason?: 'missing_token' | 'expired' | 'suspended' | 'forbidden';\n}"
+      },
+      "tourSteps": [
+        {
+          "primaryMark": {
+            "filePath": ".chalk-sandbox/userTypes.ts",
+            "startLine": 3,
+            "endLine": 8,
+            "color": "green",
+            "label": "Core user identity shape"
+          },
+          "explanationMarkdown": "`AuthUser` keeps authentication state minimal: `id`, `email`, `role`, and an optional `suspended` flag so downstream authorization checks don't need extra DB columns."
+        },
+        {
+          "primaryMark": {
+            "filePath": ".chalk-sandbox/userTypes.ts",
+            "startLine": 16,
+            "endLine": 20,
+            "color": "green",
+            "label": "Discriminated failure reasons"
+          },
+          "explanationMarkdown": "`AuthResult.reason` enumerates the four explicit failure modes instead of free-form error strings, making HTTP status mapping deterministic."
+        }
+      ],
+      "edgeMarks": [
+        {
+          "filePath": ".chalk-sandbox/userTypes.ts",
+          "startLine": 13,
+          "endLine": 13,
+          "color": "amber",
+          "label": "Clock skew risk on expiresAtMs"
+        }
+      ],
+      "edgeNotes": "Watch `expiresAtMs` across distributed nodes — if servers have clock skew, tokens near expiry could intermittently pass or fail."
+    },
+    {
+      "chunk": {
+        "id": "step1-chunk2",
+        "stepNumber": 1,
+        "chunkIndex": 2,
+        "totalChunksInStep": 2,
+        "filePath": ".chalk-sandbox/authService.ts",
+        "startLine": 1,
+        "endLine": 14,
+        "mode": "replace",
+        "summary": "Add AuthService class shell with token verification store dependency.",
+        "code": "import { AuthResult, AuthUser, SessionToken, UserRole } from './userTypes';\n\nexport interface TokenStore {\n  findToken(rawToken: string): SessionToken | undefined;\n  findUserById(userId: string): AuthUser | undefined;\n}\n\nexport class AuthService {\n  constructor(\n    private readonly store: TokenStore,\n    private readonly now: () => number = () => Date.now()\n  ) {}\n}\n"
+      },
+      "tourSteps": [
+        {
+          "primaryMark": {
+            "filePath": ".chalk-sandbox/authService.ts",
+            "startLine": 1,
+            "endLine": 6,
+            "color": "green",
+            "label": "Cross-file types imported here"
+          },
+          "referenceMark": {
+            "filePath": ".chalk-sandbox/userTypes.ts",
+            "startLine": 10,
+            "endLine": 14,
+            "color": "green",
+            "label": "SessionToken definition",
+            "openInSplitView": true
+          },
+          "explanationMarkdown": "`TokenStore` decouples storage lookups from business rules. Notice in the split pane how `SessionToken` carries `expiresAtMs` so `AuthService` can validate expiry purely in memory."
+        },
+        {
+          "primaryMark": {
+            "filePath": ".chalk-sandbox/authService.ts",
+            "startLine": 8,
+            "endLine": 13,
+            "color": "green",
+            "label": "Injectable clock for deterministic tests"
+          },
+          "explanationMarkdown": "Injecting `now: () => number = () => Date.now()` lets tests freeze time cleanly without monkey-patching globals."
+        }
+      ],
+      "edgeMarks": [
+        {
+          "filePath": ".chalk-sandbox/authService.ts",
+          "startLine": 4,
+          "endLine": 5,
+          "color": "amber",
+          "label": "Sync TokenStore won't fit async DBs without Promise<>"
+        }
+      ],
+      "edgeNotes": "If `TokenStore` later talks to Redis or Postgres, these methods will need to become async (`Promise<...>`)."
+    },
+    {
+      "chunk": {
+        "id": "step2-chunk1",
+        "stepNumber": 2,
+        "chunkIndex": 1,
+        "totalChunksInStep": 1,
+        "filePath": ".chalk-sandbox/authService.ts",
+        "startLine": 13,
+        "endLine": 13,
+        "mode": "replace",
+        "summary": "Implement authorize(rawToken, requiredRole) with expiry, suspension, and role hierarchy checks.",
+        "code": "  authorize(rawToken: string, requiredRole: UserRole = 'member'): AuthResult {\n    if (!rawToken || !rawToken.trim()) {\n      return { ok: false, reason: 'missing_token' };\n    }\n\n    const session = this.store.findToken(rawToken.trim());\n    if (!session || session.expiresAtMs <= this.now()) {\n      return { ok: false, reason: 'expired' };\n    }\n\n    const user = this.store.findUserById(session.userId);\n    if (!user || user.suspended) {\n      return { ok: false, reason: 'suspended' };\n    }\n\n    const rank: Record<UserRole, number> = { guest: 0, member: 1, admin: 2 };\n    if (rank[user.role] < rank[requiredRole]) {\n      return { ok: false, reason: 'forbidden' };\n    }\n\n    return { ok: true, user };\n  }\n}"
+      },
+      "tourSteps": [
+        {
+          "primaryMark": {
+            "filePath": ".chalk-sandbox/authService.ts",
+            "startLine": 14,
+            "endLine": 21,
+            "color": "green",
+            "label": "Fail-fast token & expiry guard"
+          },
+          "referenceMark": {
+            "filePath": ".chalk-sandbox/userTypes.ts",
+            "startLine": 16,
+            "endLine": 20,
+            "color": "green",
+            "label": "AuthResult contract",
+            "openInSplitView": true
+          },
+          "explanationMarkdown": "We reject blank tokens first, then look up the session and compare `expiresAtMs <= this.now()`. Returning `{ ok: false, reason: 'expired' }` for both unknown and expired tokens avoids leaking whether a token ever existed."
+        },
+        {
+          "primaryMark": {
+            "filePath": ".chalk-sandbox/authService.ts",
+            "startLine": 28,
+            "endLine": 31,
+            "color": "green",
+            "label": "Numeric role hierarchy"
+          },
+          "referenceMark": {
+            "filePath": ".chalk-sandbox/userTypes.ts",
+            "startLine": 1,
+            "endLine": 1,
+            "color": "green",
+            "label": "UserRole union",
+            "openInSplitView": true
+          },
+          "explanationMarkdown": "Mapping `UserRole` to a typed `Record<UserRole, number>` means TypeScript forces us to update the rank table if a new role is ever added in `userTypes.ts`."
+        }
+      ],
+      "edgeMarks": [
+        {
+          "filePath": ".chalk-sandbox/authService.ts",
+          "startLine": 24,
+          "endLine": 26,
+          "color": "amber",
+          "label": "Deleted user returns 'suspended' instead of 'expired'"
+        },
+        {
+          "filePath": ".chalk-sandbox/authService.ts",
+          "startLine": 19,
+          "endLine": 19,
+          "color": "amber",
+          "label": "Non-constant-time token lookup if store uses naive string compare"
+        }
+      ],
+      "edgeNotes": "Two subtle edge cases: (1) `!user` collapses deleted users into `reason: 'suspended'`, and (2) make sure `TokenStore.findToken` uses hashed/indexed lookup rather than naive plaintext comparison."
+    }
+  ]
+}
