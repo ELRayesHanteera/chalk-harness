@@ -1,9 +1,20 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vm from 'node:vm';
-import * as esbuild from 'esbuild';
+import { transform as sucraseTransform, Transform } from 'sucrase';
 import { CHALK_CONVERSATIONAL_TONE, LlmClient } from '../agent/llmClient.js';
 import { CodeChunk, MockReplResult } from '../types/protocol.js';
+
+function transpileToCjs(code: string, ext: string): string {
+  const transforms: Transform[] = ['imports'];
+  if (ext === '.ts' || ext === '.tsx') {
+    transforms.push('typescript');
+  }
+  if (ext === '.tsx' || ext === '.jsx') {
+    transforms.push('jsx');
+  }
+  return sucraseTransform(code, { transforms }).code;
+}
 
 /**
  * Solves the "Untestable Half-File" problem.
@@ -40,12 +51,7 @@ export class MockingRepl {
     const logs: string[] = [];
 
     try {
-      const loader = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'ts' : ext === '.jsx' ? 'jsx' : 'js';
-      const transpiled = esbuild.transformSync(params.fileContent, {
-        loader,
-        format: 'cjs',
-        target: 'node18',
-      });
+      const transpiledCode = transpileToCjs(params.fileContent, ext);
 
       const chunkAbsDir = path.dirname(
         path.isAbsolute(params.chunk.filePath)
@@ -55,7 +61,7 @@ export class MockingRepl {
 
       // Load module inside isolated VM with auto-mocking require()
       const exportsObj = this.executeCommonJsInVm(
-        transpiled.code,
+        transpiledCode,
         chunkAbsDir,
         mocksGenerated,
         logs
@@ -79,11 +85,7 @@ export class MockingRepl {
         harnessCode = buildDefaultHarness(params.prompt?.trim());
       }
 
-      const transpiledHarness = esbuild.transformSync(harnessCode, {
-        loader: 'ts',
-        format: 'cjs',
-        target: 'node18',
-      });
+      const transpiledHarnessCode = transpileToCjs(harnessCode, '.ts');
 
       const harnessModule = { exports: {} as Record<string, unknown> };
       const sandbox = {
@@ -98,7 +100,7 @@ export class MockingRepl {
         },
       };
 
-      const script = new vm.Script(transpiledHarness.code, { filename: 'chalk-mock-harness.js' });
+      const script = new vm.Script(transpiledHarnessCode, { filename: 'chalk-mock-harness.js' });
       const rawReturn = script.runInNewContext(sandbox, { timeout: 2500 });
       const finalReturn =
         typeof harnessModule.exports.run === 'function'
@@ -148,9 +150,8 @@ export class MockingRepl {
         const existing = candidates.find((c) => fs.existsSync(c) && fs.statSync(c).isFile());
         if (existing) {
           const src = fs.readFileSync(existing, 'utf8');
-          const loader = existing.endsWith('.ts') ? 'ts' : 'js';
-          const out = esbuild.transformSync(src, { loader, format: 'cjs', target: 'node18' });
-          return this.executeCommonJsInVm(out.code, path.dirname(existing), mocksGenerated, logs);
+          const outCode = transpileToCjs(src, path.extname(existing).toLowerCase());
+          return this.executeCommonJsInVm(outCode, path.dirname(existing), mocksGenerated, logs);
         }
       }
 
