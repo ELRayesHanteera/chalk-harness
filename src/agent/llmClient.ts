@@ -154,7 +154,7 @@ export class LlmClient {
   public async completeJson<T>(
     systemPrompt: string,
     userPrompt: string,
-    schema: z.ZodType<T>,
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     options?: { maxTokens?: number }
   ): Promise<T> {
     const jsonSystem = `${systemPrompt}\n\nIMPORTANT: Return ONLY valid JSON matching the requested schema. Do not wrap in commentary.`;
