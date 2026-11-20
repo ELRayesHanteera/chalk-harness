@@ -95,6 +95,27 @@ export class InlineWidgetController implements vscode.Disposable {
     this.syncPanel();
   }
 
+  /**
+   * Append a crisp Markdown card directly into the native inline CommentThread beneath
+   * `chunk.endLine` (used in `native-agent` mode for `/test` Mocking REPL results without
+   * opening a duplicate chat Webview panel).
+   */
+  public showInlineResult(authorLabel: string, markdown: string): void {
+    if (!this.activeThread) {
+      return;
+    }
+    const body = new vscode.MarkdownString(markdown);
+    body.isTrusted = true;
+    const comment: InlineComment = {
+      id: `inline-${Date.now()}`,
+      body,
+      mode: vscode.CommentMode.Preview,
+      author: { name: authorLabel },
+    };
+    this.activeThread.comments = [...this.activeThread.comments, comment];
+    this.activeThread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+  }
+
   /** Expand / focus the Claude-style side-chat Webview panel. */
   public openPanel(preserveFocus = false): void {
     if (this.panel) {

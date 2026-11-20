@@ -76,17 +76,19 @@ Whenever `stream_chunk` returns `codeModified: true`:
 - Continue streaming the remaining logical chunks for the current `filePath` via `stream_chunk` — Chalk will automatically stream them consecutively without blocking until the next file boundary.
 
 ### Rule 4 — Side-Channel Question (`action === "side_query"`)
-When the developer uses the Chalk side panel (`/explain`, `/edge`, `/trace`, `/alt`, `/followme`, or a `/btw` question) without a separate API key, `stream_chunk` or `await_dev_action` returns:
+When the developer triggers `/explain`, `/edge`, `/trace`, `/alt`, `/followme`, or `Ask /btw` from the Chalk CodeLens bar, `stream_chunk` or `await_dev_action` returns:
 ```json
 {
   "action": "side_query",
-  "sideQuery": { "command": "explain", "prompt": "...", "filePath": "...", "startLine": 1, "endLine": 20 }
+  "sideQuery": { "command": "explain", "prompt": "...", "filePath": "...", "startLine": 1, "endLine": 20, "instructions": "..." }
 }
 ```
 When you receive `action === "side_query"`:
 1. **Do NOT advance to the next chunk yet.**
-2. Answer the developer's `sideQuery` in warm, crisp, conversational Markdown by calling **`reply_side_chat`** (optionally passing `tourSteps` for `/explain`, `marks` with `color: "amber"` for `/edge`, or `ghostAnnotations` for `/trace`).
-3. Immediately call **`await_dev_action`** to resume waiting on the exact same chunk until the developer clicks **Continue**, **Undo Chunk**, **Auto-Finish File**, or asks another follow-up question.
+2. **Follow `sideQuery.instructions`:**
+   - **Native Agent Panel mode (default):** Reply directly in your native IDE agent chat panel in warm, sharp Markdown — zero duplicate chat panels! Use Chalk's visual MCP tools on the editor to make your answer visual (`highlight_tour` with `openInSplitView: true` for `/explain`, amber marks for `/edge`, `set_ghost_text` for `/trace`).
+   - **Webview mode (if `instructions` asks for `reply_side_chat`):** Deliver your answer via `reply_side_chat`.
+3. Immediately call **`await_dev_action`** to stay paused on the exact same chunk until the developer clicks **Continue**, **Undo Chunk**, **Auto-Finish File**, or asks another follow-up question.
 
 ---
 

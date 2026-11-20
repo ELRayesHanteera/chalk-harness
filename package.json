@@ -180,6 +180,15 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically start the local MCP bridge server when the IDE opens."
+        },
+        "chalk.ui.chatMode": {
+          "type": "string",
+          "enum": [
+            "native-agent",
+            "webview"
+          ],
+          "default": "native-agent",
+          "description": "'native-agent' routes side-channel slash commands directly into your IDE's native agent panel (Antigravity, Cursor, Claude Code, Codex) with zero duplicate chat UI. 'webview' opens Chalk's custom side-chat Webview panel."
         }
       }
     }

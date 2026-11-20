@@ -224,7 +224,18 @@ class ChalkCoordinator implements vscode.Disposable {
       vscode.commands.registerCommand('chalk.autoFinishFile', () =>
         this.resolveDevAction('auto_finish_file')
       ),
-      vscode.commands.registerCommand('chalk.openInlineWidget', () => {
+      vscode.commands.registerCommand('chalk.openInlineWidget', async () => {
+        if (this.isNativeAgentChatMode() && this.activeSession?.source === 'mcp') {
+          const input = await vscode.window.showInputBox({
+            title: 'Chalk — Ask Native Agent (/btw)',
+            prompt: 'Ask a question or run a slash command in your native agent panel (staying paused on this chunk)',
+            placeHolder: '/explain, /edge, /test, /trace, /alt, /followme, or any question...',
+          });
+          if (input?.trim()) {
+            await this.handleSideChatInput(input.trim());
+          }
+          return;
+        }
         this.enterSideSession();
         this.inlineWidget.openPanel(false);
       }),
@@ -239,7 +250,9 @@ class ChalkCoordinator implements vscode.Disposable {
         }
         if (cmd.trim()) {
           this.enterSideSession();
-          this.inlineWidget.openPanel(false);
+          if (!this.isNativeAgentChatMode() || this.activeSession?.source !== 'mcp') {
+            this.inlineWidget.openPanel(false);
+          }
           await this.handleSideChatInput(cmd.trim());
         }
       }),
@@ -573,23 +586,32 @@ class ChalkCoordinator implements vscode.Disposable {
     this.enterSideSession();
     this.inlineWidget.setBusy(true);
 
-    // Zero-Key MCP Side-Channel Relay:
-    // If no direct LLM API key / vscode.lm is configured and this chunk is driven by an
-    // external MCP agent (Antigravity Pro, Claude Code, Codex, Cursor), relay conversational
-    // commands (/explain, /edge, /trace, /alt, /followme, or freeform chat) to the active
-    // MCP agent via `action: "side_query"`. Local tools (/test, /history) still run locally!
+    // Native Agent Panel / Zero-Key MCP Side-Channel Relay:
+    // In `native-agent` mode (or when no separate API key is set) and this chunk is driven
+    // by an external MCP agent (Antigravity, Claude Code, Codex, Cursor), relay conversational
+    // commands (/explain, /edge, /trace, /alt, /followme, or freeform chat) straight to the
+    // IDE's native agent panel via `action: "side_query"`. Local tools (/test, /history) still run locally!
     const parsedCmd = parseSlashCommand(input);
     const isLocalOnlyCmd = parsedCmd?.command === 'test' || parsedCmd?.command === 'history';
     const session = this.activeSession;
+    const useNativeAgentPanel = this.isNativeAgentChatMode();
 
     if (
-      !this.llmClient.isConfigured() &&
+      (useNativeAgentPanel || !this.llmClient.isConfigured()) &&
       !isLocalOnlyCmd &&
       session?.source === 'mcp' &&
       session.resolveAction
     ) {
       this.slashRouter.appendUserMessage(input, parsedCmd?.command);
-      this.inlineWidget.updateMessages(this.slashRouter.getMessages());
+      if (!useNativeAgentPanel) {
+        this.inlineWidget.updateMessages(this.slashRouter.getMessages());
+      } else {
+        this.inlineWidget.setBusy(false);
+        vscode.window.setStatusBarMessage(
+          `$(comment-discussion) Chalk sent "${input}" to your native agent panel...`,
+          4000
+        );
+      }
 
       const resolver = session.resolveAction;
       session.resolveAction = undefined;
@@ -605,8 +627,9 @@ class ChalkCoordinator implements vscode.Disposable {
           filePath: session.chunk.filePath,
           startLine: session.startLine,
           endLine: session.endLine,
-          instructions:
-            'Answer the developer concisely in warm, sharp conversational tone. Call mcp__chalk__reply_side_chat with your markdown response (and optional marks, tourSteps, or ghostAnnotations), then immediately call mcp__chalk__await_dev_action to keep waiting on this same chunk.',
+          instructions: useNativeAgentPanel
+            ? 'Reply directly in your native IDE agent chat panel in warm, sharp conversational Markdown (no need to call reply_side_chat). Use visual MCP tools on the editor when helpful (highlight_tour for /explain with split-view references, highlight_tour with amber marks for /edge, set_ghost_text for /trace). Then IMMEDIATELY call mcp__chalk__await_dev_action to stay paused on this exact same chunk without advancing.'
+            : 'Answer the developer concisely in warm, sharp conversational tone. Call mcp__chalk__reply_side_chat with your markdown response (and optional marks, tourSteps, or ghostAnnotations), then immediately call mcp__chalk__await_dev_action to keep waiting on this same chunk.',
         },
       });
       return;
@@ -627,6 +650,11 @@ class ChalkCoordinator implements vscode.Disposable {
       });
 
       this.inlineWidget.updateMessages(this.slashRouter.getMessages());
+
+      // In native-agent mode, display local `/test` Mocking REPL output inline beneath chunk.endLine
+      if (useNativeAgentPanel && parsedCmd?.command === 'test') {
+        this.inlineWidget.showInlineResult('Chalk Mocking REPL (/test)', outcome.assistantMessage.contentMarkdown);
+      }
 
       if (outcome.tourSteps && outcome.tourSteps.length > 0) {
         await this.camera.startTour(outcome.tourSteps);
@@ -886,6 +914,13 @@ class ChalkCoordinator implements vscode.Disposable {
     const mcpLabel = port ? `MCP:${port}` : 'MCP:off';
     this.statusBar.text = `$(mortar-board) Chalk (${mcpLabel} · ${this.state})`;
     this.statusBar.tooltip = `Chalk Whiteboard Harness — Click for MCP config & session options`;
+  }
+
+  private isNativeAgentChatMode(): boolean {
+    return (
+      vscode.workspace.getConfiguration('chalk.ui').get<string>('chatMode', 'native-agent') ===
+      'native-agent'
+    );
   }
 
   private readLlmConfig(): LlmConfig {
