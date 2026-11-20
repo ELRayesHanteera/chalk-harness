@@ -188,7 +188,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs",
+    "test": "npm run build && tsc && node --test test/*.test.mjs",
     "package": "npm run build && npx @vscode/vsce package --no-dependencies"
   },
   "dependencies": {

@@ -1,0 +1,12 @@
+.agents/**
+.vscode/**
+.git/**
+node_modules/**
+src/**
+out/**
+test/**
+*.vsix
+**/*.map
+tsconfig.json
+esbuild.config.mjs
+.gitignore
