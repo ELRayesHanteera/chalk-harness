@@ -84,6 +84,37 @@ export class SlashRouter {
     this.lastFollowMeHintBuffer = '';
   }
 
+  /** Record a user message when relaying a side-chat query over MCP. */
+  public appendUserMessage(rawInput: string, command?: SlashCommandName): SideChatMessage {
+    const msg: SideChatMessage = {
+      id: makeId('u'),
+      role: 'user',
+      command,
+      contentMarkdown: rawInput.trim(),
+      timestamp: new Date().toISOString(),
+    };
+    this.messages.push(msg);
+    return msg;
+  }
+
+  /** Record an assistant reply delivered from the MCP side-channel relay. */
+  public appendAssistantMessage(
+    contentMarkdown: string,
+    extras?: Partial<Pick<SideChatMessage, 'command' | 'tourSteps' | 'edgeMarks'>>
+  ): SideChatMessage {
+    const msg: SideChatMessage = {
+      id: makeId('a'),
+      role: 'assistant',
+      command: extras?.command,
+      contentMarkdown,
+      timestamp: new Date().toISOString(),
+      tourSteps: extras?.tourSteps,
+      edgeMarks: extras?.edgeMarks,
+    };
+    this.messages.push(msg);
+    return msg;
+  }
+
   public async handleInput(
     rawInput: string,
     ctx: SlashExecutionContext

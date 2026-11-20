@@ -183,6 +183,45 @@ export function createChalkMcpServer(port: number): McpServer {
     }
   );
 
+  server.tool(
+    'reply_side_chat',
+    'Send a conversational reply into Chalks inline side-chat panel (used when answering a `side_query` from the developer without needing a separate API key). Optionally applies Chalk Marks, a split-screen tour, or Ghost Chalk annotations.',
+    {
+      markdown: z.string().describe('Warm, concise Markdown answer rendered in the Chalk side-chat panel'),
+      marks: z.array(ChalkMarkInputSchema).optional().describe('Optional Chalk Marks (green/amber/blue/red) to highlight lines'),
+      tourSteps: z.array(ChalkTourStepInputSchema).optional().describe('Optional interactive [< Prev / Next >] tour steps'),
+      ghostAnnotations: z
+        .array(
+          z.object({
+            line: z.number().int().min(1),
+            text: z.string(),
+            color: z.enum(['green', 'amber', 'blue', 'red']).optional(),
+          })
+        )
+        .optional()
+        .describe('Optional inline Ghost Chalk annotations for /trace'),
+      filePath: z.string().optional().describe('Target filePath for ghostAnnotations if omitted defaults to active chunk file'),
+    },
+    async (args) => {
+      const result = await callBridge(port, 'chalk_reply_side_chat', args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    'await_dev_action',
+    'Resume blocking on the currently active Chalk chunk after calling `reply_side_chat`, waiting until the developer clicks Continue, Auto-Finish File, Undo Chunk, or asks another side-chat question.',
+    {},
+    async () => {
+      const result = await callBridge(port, 'chalk_await_dev_action', {});
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
   return server;
 }
 

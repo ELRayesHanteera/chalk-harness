@@ -7,7 +7,7 @@ import { ChalkMcpBridgeServer } from './mcp/server.js';
 import { MockAgentPlayer } from './mock/mockAgentPlayer.js';
 import { BoardEraserSquasher } from './sideAgent/boardEraserSquasher.js';
 import { MockingRepl } from './sideAgent/mockingRepl.js';
-import { SlashRouter } from './sideAgent/slashRouter.js';
+import { parseSlashCommand, SlashRouter } from './sideAgent/slashRouter.js';
 import { TraceAndAltEngine } from './sideAgent/traceAndAlt.js';
 import {
   AgentPlayer,
@@ -33,7 +33,9 @@ interface ActiveChunkSession {
   startLine: number;
   endLine: number;
   bufferAfterDraw: string;
+  source: 'mcp' | 'player';
   resolveAction?: (resolution: DevActionResolution) => void;
+  queuedResolution?: DevActionResolution;
 }
 
 /**
@@ -119,7 +121,7 @@ class ChalkCoordinator implements vscode.Disposable {
     });
 
     this.mcpBridge = new ChalkMcpBridgeServer({
-      onStreamChunk: (chunk) => this.presentChunkAndAwaitResolution(chunk),
+      onStreamChunk: (chunk) => this.presentChunkAndAwaitResolution(chunk, 'mcp'),
       onHighlightTour: async (steps) => {
         await this.camera.startTour(steps);
         return { stepsLoaded: steps.length };
@@ -133,6 +135,47 @@ class ChalkCoordinator implements vscode.Disposable {
       onClearMarks: async () => {
         this.markManager.clearMarks(true);
         return { cleared: true };
+      },
+      onReplySideChat: async (params) => {
+        this.slashRouter.appendAssistantMessage(params.markdown, {
+          tourSteps: params.tourSteps,
+          edgeMarks: params.marks,
+        });
+        this.inlineWidget.updateMessages(this.slashRouter.getMessages());
+        this.inlineWidget.setBusy(false);
+
+        if (params.tourSteps && params.tourSteps.length > 0) {
+          await this.camera.startTour(params.tourSteps);
+        }
+        if (params.marks && params.marks.length > 0) {
+          this.markManager.applyMarks(params.marks, (fp) => this.camera.resolveUri(fp), false);
+        }
+        if (params.ghostAnnotations && params.ghostAnnotations.length > 0) {
+          const targetPath = params.filePath ?? this.activeSession?.chunk.filePath;
+          if (targetPath) {
+            const uri = this.camera.resolveUri(targetPath);
+            this.markManager.setGhostText(uri, params.ghostAnnotations);
+          }
+        }
+        return { delivered: true };
+      },
+      onAwaitDevAction: async () => {
+        const session = this.activeSession;
+        if (!session) {
+          return {
+            action: 'continue',
+            codeModified: false,
+            decisionSummary: 'No active chunk session; continuing.',
+          };
+        }
+        if (session.queuedResolution) {
+          const queued = session.queuedResolution;
+          session.queuedResolution = undefined;
+          return queued;
+        }
+        return new Promise<DevActionResolution>((resolve) => {
+          session.resolveAction = resolve;
+        });
       },
       onStatus: () => ({
         state: this.state,
@@ -233,7 +276,10 @@ class ChalkCoordinator implements vscode.Disposable {
    * Core state machine entry point called by BOTH external MCP agents (`stream_chunk`)
    * and internal standalone players (`LlmAgentPlayer`, `MockAgentPlayer`).
    */
-  public async presentChunkAndAwaitResolution(chunk: CodeChunk): Promise<DevActionResolution> {
+  public async presentChunkAndAwaitResolution(
+    chunk: CodeChunk,
+    source: 'mcp' | 'player' = 'player'
+  ): Promise<DevActionResolution> {
     // 1. SNAPSHOT_PRE_CHUNK
     await this.setState('SNAPSHOT_PRE_CHUNK');
     await this.checkpoints.createPreChunkSnapshot(chunk.id, chunk.filePath, chunk.summary);
@@ -273,6 +319,7 @@ class ChalkCoordinator implements vscode.Disposable {
         startLine: streamRes.actualStartLine,
         endLine: streamRes.actualEndLine,
         bufferAfterDraw,
+        source,
         resolveAction: resolve,
       };
       this.inlineWidget.anchorToChunk(
@@ -307,13 +354,20 @@ class ChalkCoordinator implements vscode.Disposable {
       await this.setState('IDLE');
       vscode.window.setStatusBarMessage('$(discard) Chalk: Reverted chunk to shadow checkpoint', 3000);
 
-      session.resolveAction?.({
+      const undoResolution: DevActionResolution = {
         action: 'undo_chunk',
         codeModified: false,
         chunkId: session.chunk.id,
         filePath: session.chunk.filePath,
         decisionSummary: 'Developer undid chunk; reverted to pre-chunk snapshot.',
-      });
+      };
+      if (session.resolveAction) {
+        const resolver = session.resolveAction;
+        session.resolveAction = undefined;
+        resolver(undoResolution);
+      } else {
+        session.queuedResolution = undoResolution;
+      }
       return;
     }
 
@@ -367,7 +421,13 @@ class ChalkCoordinator implements vscode.Disposable {
     }
 
     await this.setState('IDLE');
-    session.resolveAction?.(resolution);
+    if (session.resolveAction) {
+      const resolver = session.resolveAction;
+      session.resolveAction = undefined;
+      resolver(resolution);
+    } else {
+      session.queuedResolution = resolution;
+    }
   }
 
   private async runSessionQuickPick(): Promise<void> {
@@ -512,6 +572,45 @@ class ChalkCoordinator implements vscode.Disposable {
 
     this.enterSideSession();
     this.inlineWidget.setBusy(true);
+
+    // Zero-Key MCP Side-Channel Relay:
+    // If no direct LLM API key / vscode.lm is configured and this chunk is driven by an
+    // external MCP agent (Antigravity Pro, Claude Code, Codex, Cursor), relay conversational
+    // commands (/explain, /edge, /trace, /alt, /followme, or freeform chat) to the active
+    // MCP agent via `action: "side_query"`. Local tools (/test, /history) still run locally!
+    const parsedCmd = parseSlashCommand(input);
+    const isLocalOnlyCmd = parsedCmd?.command === 'test' || parsedCmd?.command === 'history';
+    const session = this.activeSession;
+
+    if (
+      !this.llmClient.isConfigured() &&
+      !isLocalOnlyCmd &&
+      session?.source === 'mcp' &&
+      session.resolveAction
+    ) {
+      this.slashRouter.appendUserMessage(input, parsedCmd?.command);
+      this.inlineWidget.updateMessages(this.slashRouter.getMessages());
+
+      const resolver = session.resolveAction;
+      session.resolveAction = undefined;
+      resolver({
+        action: 'side_query',
+        codeModified: false,
+        chunkId: session.chunk.id,
+        filePath: session.chunk.filePath,
+        sideQuery: {
+          command: parsedCmd?.command,
+          prompt: parsedCmd?.prompt ?? input,
+          rawInput: input,
+          filePath: session.chunk.filePath,
+          startLine: session.startLine,
+          endLine: session.endLine,
+          instructions:
+            'Answer the developer concisely in warm, sharp conversational tone. Call mcp__chalk__reply_side_chat with your markdown response (and optional marks, tourSteps, or ghostAnnotations), then immediately call mcp__chalk__await_dev_action to keep waiting on this same chunk.',
+        },
+      });
+      return;
+    }
 
     try {
       const doc = await vscode.workspace.openTextDocument(

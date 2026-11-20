@@ -55,7 +55,17 @@ export interface ChalkTourStep {
   explanationMarkdown: string;
 }
 
-export type DevAction = 'continue' | 'auto_finish_file' | 'undo_chunk';
+export type DevAction = 'continue' | 'auto_finish_file' | 'undo_chunk' | 'side_query';
+
+export interface SideQueryPayload {
+  command?: SlashCommandName;
+  prompt: string;
+  rawInput: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  instructions: string;
+}
 
 export interface DevActionResolution {
   action: DevAction;
@@ -64,6 +74,7 @@ export interface DevActionResolution {
   decisionSummary?: string;
   chunkId?: string;
   filePath?: string;
+  sideQuery?: SideQueryPayload;
 }
 
 export type SlashCommandName =
@@ -176,6 +187,8 @@ export interface McpBridgeRequest {
     | 'chalk_highlight_tour'
     | 'chalk_set_ghost_text'
     | 'chalk_clear_marks'
+    | 'chalk_reply_side_chat'
+    | 'chalk_await_dev_action'
     | 'chalk_status';
   params: Record<string, unknown>;
 }

@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
+  ChalkMarkInstruction,
   ChalkTourStep,
   CodeChunk,
   DevActionResolution,
@@ -17,6 +18,14 @@ export interface ChalkMcpHandlers {
     lineAnnotations: GhostTextAnnotation[]
   ) => Promise<{ applied: number }>;
   onClearMarks: () => Promise<{ cleared: boolean }>;
+  onReplySideChat: (params: {
+    markdown: string;
+    marks?: ChalkMarkInstruction[];
+    tourSteps?: ChalkTourStep[];
+    ghostAnnotations?: GhostTextAnnotation[];
+    filePath?: string;
+  }) => Promise<{ delivered: boolean }>;
+  onAwaitDevAction: () => Promise<DevActionResolution>;
   onStatus: () => { state: string; activeFile?: string; activeChunkId?: string };
 }
 
@@ -190,6 +199,29 @@ export class ChalkMcpBridgeServer {
 
       case 'chalk_clear_marks':
         return this.handlers.onClearMarks();
+
+      case 'chalk_reply_side_chat': {
+        const markdown = String(req.params.markdown ?? '');
+        if (!markdown.trim()) {
+          throw new Error('reply_side_chat requires non-empty markdown.');
+        }
+        return this.handlers.onReplySideChat({
+          markdown,
+          marks: Array.isArray(req.params.marks)
+            ? (req.params.marks as ChalkMarkInstruction[])
+            : undefined,
+          tourSteps: Array.isArray(req.params.tourSteps)
+            ? (req.params.tourSteps as ChalkTourStep[])
+            : undefined,
+          ghostAnnotations: Array.isArray(req.params.ghostAnnotations)
+            ? (req.params.ghostAnnotations as GhostTextAnnotation[])
+            : undefined,
+          filePath: typeof req.params.filePath === 'string' ? req.params.filePath : undefined,
+        });
+      }
+
+      case 'chalk_await_dev_action':
+        return this.handlers.onAwaitDevAction();
 
       case 'chalk_status':
         return this.handlers.onStatus();

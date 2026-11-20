@@ -308,6 +308,14 @@ test('End-to-End MCP Protocol: StdioClient -> dist/mcp/stdioProxy.js -> ChalkMcp
       receivedCalls.push({ tool: 'clear_marks' });
       return { cleared: true };
     },
+    onReplySideChat: async (params) => {
+      receivedCalls.push({ tool: 'reply_side_chat', markdown: params.markdown });
+      return { delivered: true };
+    },
+    onAwaitDevAction: async () => {
+      receivedCalls.push({ tool: 'await_dev_action' });
+      return { action: 'continue', codeModified: false };
+    },
     onStatus: () => ({ state: 'IDLE' }),
   });
 
@@ -333,8 +341,10 @@ test('End-to-End MCP Protocol: StdioClient -> dist/mcp/stdioProxy.js -> ChalkMcp
     const toolsRes = await client.listTools();
     const names = toolsRes.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
+      'await_dev_action',
       'clear_marks',
       'highlight_tour',
+      'reply_side_chat',
       'set_ghost_text',
       'stream_chunk',
     ]);
@@ -386,7 +396,17 @@ test('End-to-End MCP Protocol: StdioClient -> dist/mcp/stdioProxy.js -> ChalkMcp
     const clearRes = await client.callTool({ name: 'clear_marks', arguments: {} });
     assert.deepEqual(JSON.parse(clearRes.content[0].text), { cleared: true });
 
-    assert.equal(receivedCalls.length, 4);
+    // 5. reply_side_chat & await_dev_action (Zero-Key MCP Side-Channel Relay)
+    const replyRes = await client.callTool({
+      name: 'reply_side_chat',
+      arguments: { markdown: 'Here is why `x` starts at 1.' },
+    });
+    assert.deepEqual(JSON.parse(replyRes.content[0].text), { delivered: true });
+
+    const awaitRes = await client.callTool({ name: 'await_dev_action', arguments: {} });
+    assert.equal(JSON.parse(awaitRes.content[0].text).action, 'continue');
+
+    assert.equal(receivedCalls.length, 6);
   } finally {
     await client.close();
     await bridge.stop();

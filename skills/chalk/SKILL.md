@@ -75,6 +75,19 @@ Whenever `stream_chunk` returns `codeModified: true`:
 ### Rule 3 — Fast-Forward (`action === "auto_finish_file"`)
 - Continue streaming the remaining logical chunks for the current `filePath` via `stream_chunk` — Chalk will automatically stream them consecutively without blocking until the next file boundary.
 
+### Rule 4 — Side-Channel Question (`action === "side_query"`)
+When the developer uses the Chalk side panel (`/explain`, `/edge`, `/trace`, `/alt`, `/followme`, or a `/btw` question) without a separate API key, `stream_chunk` or `await_dev_action` returns:
+```json
+{
+  "action": "side_query",
+  "sideQuery": { "command": "explain", "prompt": "...", "filePath": "...", "startLine": 1, "endLine": 20 }
+}
+```
+When you receive `action === "side_query"`:
+1. **Do NOT advance to the next chunk yet.**
+2. Answer the developer's `sideQuery` in warm, crisp, conversational Markdown by calling **`reply_side_chat`** (optionally passing `tourSteps` for `/explain`, `marks` with `color: "amber"` for `/edge`, or `ghostAnnotations` for `/trace`).
+3. Immediately call **`await_dev_action`** to resume waiting on the exact same chunk until the developer clicks **Continue**, **Undo Chunk**, **Auto-Finish File**, or asks another follow-up question.
+
 ---
 
 ## 4. Connecting Any Harness to Chalk MCP
