@@ -23,6 +23,7 @@ import {
 import { ActionBarCodeLensProvider } from './ui/actionBarCodeLens.js';
 import { CameraController } from './ui/cameraController.js';
 import { ChalkMarkManager } from './ui/chalkMarkManager.js';
+import { HistoryScrubberController } from './ui/historyScrubber.js';
 import { InlineWidgetController } from './ui/inlineWidgetController.js';
 import { ChunkStreamer } from './ui/streamer.js';
 
@@ -56,6 +57,7 @@ class ChalkCoordinator implements vscode.Disposable {
   private readonly squasher: BoardEraserSquasher;
   private readonly slashRouter: SlashRouter;
   private readonly inlineWidget: InlineWidgetController;
+  private readonly historyScrubber: HistoryScrubberController;
   private readonly mcpBridge: ChalkMcpBridgeServer;
   private readonly statusBar: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
@@ -76,6 +78,12 @@ class ChalkCoordinator implements vscode.Disposable {
     this.traceAndAlt = new TraceAndAltEngine(this.llmClient, this.mockingRepl);
     this.squasher = new BoardEraserSquasher(this.llmClient);
     this.slashRouter = new SlashRouter(this.llmClient, this.mockingRepl);
+    this.historyScrubber = new HistoryScrubberController(
+      this.checkpoints,
+      this.camera,
+      this.markManager,
+      this.llmClient
+    );
 
     this.inlineWidget = new InlineWidgetController({
       onSendMessage: (input) => this.handleSideChatInput(input),
@@ -505,6 +513,7 @@ class ChalkCoordinator implements vscode.Disposable {
         onTrace: (chunk, content, prompt) => this.traceAndAlt.runTrace(chunk, content, prompt),
         onAlt: (chunk, content, prompt) =>
           this.traceAndAlt.generateAlternative(chunk, content, prompt),
+        onHistory: (filePath, prompt) => this.historyScrubber.open(filePath, prompt),
       });
 
       this.inlineWidget.updateMessages(this.slashRouter.getMessages());
@@ -626,9 +635,23 @@ class ChalkCoordinator implements vscode.Disposable {
   }
 
   private async openHistoryForActiveFile(): Promise<void> {
-    vscode.window.showInformationMessage(
-      'Chalk /history scrubber will be enabled in Step 8.'
-    );
+    const filePath =
+      this.activeSession?.chunk.filePath ??
+      (vscode.window.activeTextEditor?.document.uri.scheme === 'file'
+        ? path
+            .relative(this.getWorkspaceRoot(), vscode.window.activeTextEditor.document.uri.fsPath)
+            .replace(/\\/g, '/')
+        : null);
+
+    if (!filePath) {
+      vscode.window.showInformationMessage('Open a file first to launch Chalk /history scrubber.');
+      return;
+    }
+
+    const summary = await this.historyScrubber.open(filePath);
+    if (summary.startsWith('No Git commits')) {
+      vscode.window.showInformationMessage(summary);
+    }
   }
 
   private async showMcpStatusDialog(): Promise<void> {
@@ -780,6 +803,7 @@ class ChalkCoordinator implements vscode.Disposable {
     this.camera.dispose();
     this.codeLens.dispose();
     this.inlineWidget.dispose();
+    this.historyScrubber.dispose();
     this.statusBar.dispose();
     for (const d of this.disposables) {
       d.dispose();
